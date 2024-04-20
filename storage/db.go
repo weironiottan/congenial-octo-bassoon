@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -24,7 +23,6 @@ var (
 // GetOrder should return the order with the given ID. If that ID isn't found then
 // the special ErrOrderNotFound error should be returned.
 func (i *Instance) GetOrder(ctx context.Context, id string) (Order, error) {
-	// This one perplexes me why is this not working, idk but I am moving on, some kind gremlins are lurking here
 	var order Order
 	filter := bson.M{"id": id}
 	err := i.collection.FindOne(ctx, filter).Decode(&order)
@@ -35,7 +33,7 @@ func (i *Instance) GetOrder(ctx context.Context, id string) (Order, error) {
 		return Order{}, err
 	}
 
-	return Order{}, nil
+	return order, nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -81,8 +79,11 @@ func (i *Instance) SetOrderStatus(ctx context.Context, id string, status OrderSt
 	filter := bson.D{{Key: "id", Value: id}}
 
 	update := bson.D{{Key: "$set", Value: bson.D{{Key: "status", Value: status}}}}
-	_, err := i.collection.UpdateOne(ctx, filter, update)
+	result, err := i.collection.UpdateOne(ctx, filter, update)
 	if err != nil {
+		return err
+	}
+	if result.MatchedCount == 0 {
 		return ErrOrderNotFound
 	}
 
@@ -110,14 +111,16 @@ func (i *Instance) InsertOrder(ctx context.Context, order Order) (string, error)
 	}
 
 	// If no document with the same ID exists, insert the new document
-	result, err := i.collection.InsertOne(ctx, order)
+	_, err := i.collection.InsertOne(ctx, order)
 	if err != nil {
 		return "", fmt.Errorf("error inserting document: %e", err)
 	}
-	insertedID, ok := result.InsertedID.(primitive.ObjectID)
-	if !ok {
-		return "", errors.New("was not able to type assert the returned ID from mongo")
-	}
 
-	return insertedID.String(), nil
+	//originally added this type assertion and conversion but now I think this is overkill
+	//insertedID, ok := result.InsertedID.(primitive.ObjectID)
+	//if !ok {
+	//	return "", errors.New("was not able to type assert the returned ID from mongo")
+	//}
+
+	return order.ID, nil
 }

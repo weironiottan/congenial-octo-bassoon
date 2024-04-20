@@ -51,14 +51,14 @@ func TestGetOrder(t *testing.T) {
 		},
 		Status: OrderStatusCharged,
 	}
-	id, err := inst.InsertOrder(ctx, order)
+	_, err := inst.InsertOrder(ctx, order)
 	// the require package fails the whole test immediately if this fails which is
 	// useful for unexpected errors since the rest of the test will presumably fail
 	// if we can't do this
 	require.NoError(t, err)
 
 	// returns expected order
-	got, err := inst.GetOrder(ctx, id)
+	got, err := inst.GetOrder(ctx, order.ID)
 	require.NoError(t, err)
 	assert.Equal(t, order, got)
 
@@ -79,7 +79,7 @@ func TestGetOrders(t *testing.T) {
 	ctx := context.Background()
 	// make a new instance with a random database so this test is isolated from
 	// the others
-	inst := New(randomDatabase())
+	inst := New("mongo")
 	order1 := Order{
 		ID:            "test1",
 		CustomerEmail: "test@test",
@@ -162,7 +162,7 @@ func TestSetOrderStatus(t *testing.T) {
 	// make a new instance with a random database so this test is isolated from
 	// the others
 	inst := New("mongo")
-	id, err := inst.InsertOrder(ctx, Order{
+	_, err := inst.InsertOrder(ctx, Order{
 		ID:            "test1",
 		CustomerEmail: "test@test",
 		LineItems: []LineItem{
@@ -183,6 +183,7 @@ func TestSetOrderStatus(t *testing.T) {
 	// useful for unexpected errors since the rest of the test will presumably fail
 	// if we can't do this
 	require.NoError(t, err)
+	id := "test1"
 
 	// returns all if -1 is sent
 	err = inst.SetOrderStatus(ctx, id, OrderStatusFulfilled)
