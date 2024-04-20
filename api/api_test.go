@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path"
@@ -792,6 +793,141 @@ func TestPostFulfillOrder(t *testing.T) {
 	// these variables and you should delete these lines once you add the tests
 	_ = ctx
 	_ = fulfillServ
-	// TODO: add tests
+
+	// Order has already been fulfilled we do not call SetOrderStatus, instead skip it and return a 200 ok status
+	{
+		order := storage.Order{
+			ID:            "order-1234",
+			CustomerEmail: "test@test",
+			LineItems: []storage.LineItem{
+				{
+					Description: "item 1",
+					Quantity:    1,
+					PriceCents:  100,
+				},
+			},
+			Status: storage.OrderStatusFulfilled,
+		}
+		args := fulfillmentServiceFulfillArgs{
+			Description: "Item 2",
+			Quantity:    1,
+			OrderID:     "order-1234",
+		}
+		stor := new(mocks.MockStorageInstance)
+		stor.On("GetOrder", ctx, order.ID).Return(order, nil).Once()
+
+		h := Handler(stor, nil, fulfillServ)
+		w := httptest.NewRecorder()
+		byts, err := json.Marshal(args)
+		require.NoError(t, err)
+		r := httptest.NewRequest("PUT", path.Join("/fulfill"), bytes.NewReader(byts)).WithContext(ctx)
+		h.ServeHTTP(w, r)
+		var res fulfillmentServiceFulfillRes
+		err = json.Unmarshal(w.Body.Bytes(), &res)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.EqualValues(t, "order-1234", res.OrderID)
+		assert.EqualValues(t, storage.OrderStatusFulfilled, res.Status)
+		stor.AssertExpectations(t)
+	}
+	{
+		order := storage.Order{
+			ID:            "order-1234",
+			CustomerEmail: "test@test",
+			LineItems: []storage.LineItem{
+				{
+					Description: "item 1",
+					Quantity:    1,
+					PriceCents:  100,
+				},
+			},
+			Status: storage.OrderStatusCharged,
+		}
+		args := fulfillmentServiceFulfillArgs{
+			Description: "Item 1",
+			Quantity:    1,
+			OrderID:     "order-1234",
+		}
+		stor := new(mocks.MockStorageInstance)
+		stor.On("GetOrder", ctx, order.ID).Return(order, nil).Once()
+		stor.On("SetOrderStatus", ctx, order.ID, storage.OrderStatusFulfilled).Return(nil, nil).Once()
+
+		h := Handler(stor, nil, fulfillServ)
+		w := httptest.NewRecorder()
+		byts, err := json.Marshal(args)
+		require.NoError(t, err)
+		r := httptest.NewRequest("PUT", path.Join("/fulfill"), bytes.NewReader(byts)).WithContext(ctx)
+		h.ServeHTTP(w, r)
+		var res fulfillmentServiceFulfillRes
+		err = json.Unmarshal(w.Body.Bytes(), &res)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.EqualValues(t, "order-1234", res.OrderID)
+		assert.EqualValues(t, storage.OrderStatusFulfilled, res.Status)
+		stor.AssertExpectations(t)
+	}
+	// Order status is storage.OrderStatusPending, should return StatusConflict error
+	{
+		order := storage.Order{
+			ID:            "order-1234",
+			CustomerEmail: "test@test",
+			LineItems: []storage.LineItem{
+				{
+					Description: "item 1",
+					Quantity:    1,
+					PriceCents:  100,
+				},
+			},
+			Status: storage.OrderStatusPending,
+		}
+		args := fulfillmentServiceFulfillArgs{
+			Description: "Item 1",
+			Quantity:    1,
+			OrderID:     "order-1234",
+		}
+		stor := new(mocks.MockStorageInstance)
+		stor.On("GetOrder", ctx, order.ID).Return(order, nil).Once()
+
+		h := Handler(stor, nil, fulfillServ)
+		w := httptest.NewRecorder()
+		byts, err := json.Marshal(args)
+		require.NoError(t, err)
+		r := httptest.NewRequest("PUT", path.Join("/fulfill"), bytes.NewReader(byts)).WithContext(ctx)
+		h.ServeHTTP(w, r)
+		assert.Equal(t, http.StatusConflict, w.Code)
+		stor.AssertExpectations(t)
+	}
+
+	// Order status was unable to be changed, should return StatusInternalServerError
+	{
+		order := storage.Order{
+			ID:            "order-1234",
+			CustomerEmail: "test@test",
+			LineItems: []storage.LineItem{
+				{
+					Description: "item 1",
+					Quantity:    1,
+					PriceCents:  100,
+				},
+			},
+			Status: storage.OrderStatusCharged,
+		}
+		args := fulfillmentServiceFulfillArgs{
+			Description: "Item 1",
+			Quantity:    1,
+			OrderID:     "order-1234",
+		}
+		stor := new(mocks.MockStorageInstance)
+		stor.On("GetOrder", ctx, order.ID).Return(order, nil).Once()
+		stor.On("SetOrderStatus", ctx, order.ID, storage.OrderStatusFulfilled).Return(errors.New("unable to change the change the order status"), nil).Once()
+		h := Handler(stor, nil, fulfillServ)
+		w := httptest.NewRecorder()
+		byts, err := json.Marshal(args)
+		require.NoError(t, err)
+		r := httptest.NewRequest("PUT", path.Join("/fulfill"), bytes.NewReader(byts)).WithContext(ctx)
+		h.ServeHTTP(w, r)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		stor.AssertExpectations(t)
+	}
 
 }

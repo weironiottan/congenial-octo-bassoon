@@ -8,13 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
-	"net/http"
-	"strings"
-
 	"github.com/gin-gonic/gin"
 	"github.com/levenlabs/order-up/mocks"
 	"github.com/levenlabs/order-up/storage"
+	"io/ioutil"
+	"net/http"
+	"strings"
 )
 
 // instance represents an API instance. Typically this is exported but for our
@@ -49,6 +48,7 @@ func Handler(stor mocks.StorageInstance, fulfillmentService, chargeService *http
 	inst.router.GET("/orders/:id", inst.getOrder)
 	inst.router.POST("/orders/:id/charge", inst.chargeOrder)
 	inst.router.POST("/orders/:id/cancel", inst.cancelOrder)
+	inst.router.PUT("/fulfill", inst.fulfillOrder)
 
 	// *instance implements the http.Handler interface with the ServeHTTP method
 	// below so we can just return inst
@@ -424,4 +424,53 @@ type fulfillmentServiceFulfillArgs struct {
 	OrderID     string `json:"orderID"`
 }
 
+type fulfillmentServiceFulfillRes struct {
+	OrderID string              `json:"OrderID"`
+	Status  storage.OrderStatus `json:"Status"`
+}
+
 // TODO: fulfill args, res, function
+func (i *instance) fulfillOrder(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	// parse the body as JSON into the chargeOrderArgs struct
+	var args fulfillmentServiceFulfillArgs
+	err := c.BindJSON(&args)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("error decoding body: %v", err)})
+		return
+	}
+
+	order, err := i.stor.GetOrder(ctx, args.OrderID)
+	if err != nil {
+		if errors.Is(err, storage.ErrOrderNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("error getting order: %v", err)})
+		}
+		return
+	}
+
+	if order.Status != storage.OrderStatusCharged && order.Status != storage.OrderStatusFulfilled {
+		c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("Order cannot be fulfilled since the status is elibigle for fulfillment processing: %v", err)})
+		return
+	}
+
+	// makes sure we ignore statuses that have been fulfilled
+	if order.Status != storage.OrderStatusFulfilled {
+
+		err = i.stor.SetOrderStatus(ctx, args.OrderID, storage.OrderStatusFulfilled)
+
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("error updating order to fulfilled: %v", err)})
+			return
+		}
+
+	}
+
+	c.JSON(http.StatusOK, fulfillmentServiceFulfillRes{
+		OrderID: order.ID,
+		Status:  storage.OrderStatusFulfilled,
+	})
+
+}
