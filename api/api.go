@@ -49,6 +49,7 @@ func Handler(stor mocks.StorageInstance, fulfillmentService, chargeService *http
 	inst.router.GET("/orders/:id", inst.getOrder)
 	inst.router.POST("/orders/:id/charge", inst.chargeOrder)
 	inst.router.POST("/orders/:id/cancel", inst.cancelOrder)
+	inst.router.PUT("/orders", inst.postOrders)
 
 	// *instance implements the http.Handler interface with the ServeHTTP method
 	// below so we can just return inst
@@ -406,7 +407,7 @@ func (i *instance) cancelOrder(c *gin.Context) {
 		return
 	}
 
-	// since we successfully charged the order and updated the order status we can
+	// since we successfully refunded the customer and updated the Order Status, we can
 	// return a success to the caller
 	c.JSON(http.StatusOK, cancelOrderRes{
 		RefundAmount: order.TotalCents(),
@@ -425,3 +426,56 @@ type fulfillmentServiceFulfillArgs struct {
 }
 
 // TODO: fulfill args, res, function
+func (i *instance) fulfill(c *gin.Context) {
+	// the context of the request we pass along to every downstream function so we
+	// can stop processing if the caller aborts the request and also to ensure that
+	// the tracing context is kept throughout the whole request
+	ctx := c.Request.Context()
+
+	// parse the body as JSON into the newOrderArgs struct
+	var args fulfillmentServiceFulfillArgs
+	err := c.BindJSON(&args)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("error decoding body: %v", err)})
+		return
+	}
+
+	//if !strings.Contains(args.CustomerEmail, "@") {
+	//	c.JSON(http.StatusBadRequest, gin.H{"error": "invalid customerEmail"})
+	//	return
+	//}
+	//if len(args.LineItems) < 1 {
+	//	c.JSON(http.StatusBadRequest, gin.H{"error": "an order must contain at least one line item"})
+	//	return
+	//}
+
+	//order := storage.Order{
+	//	CustomerEmail: args.CustomerEmail,
+	//	LineItems:     args.LineItems,
+	//	Status:        storage.OrderStatusPending,
+	//}
+	//if order.TotalCents() < 0 {
+	//	c.JSON(http.StatusBadRequest, gin.H{"error": "an order's total cannot be less than 0"})
+	//}
+
+
+
+	order, err := i.stor.GetOrder(ctx, args.OrderID)
+	if err != nil {
+		// if the error is a ErrOrderNotFound error then we return 404 otherwise we
+		// return a 500 error
+		if errors.Is(err, storage.ErrOrderNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("error getting order: %v", err)})
+		}
+		return
+	}
+
+	if order.Status != storage.OrderStatusCharged
+
+	// respond with a success and return the order
+	c.JSON(http.StatusOK, postOrderRes{
+		Order: order,
+	})
+}
