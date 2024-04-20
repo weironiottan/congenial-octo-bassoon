@@ -48,6 +48,7 @@ func Handler(stor mocks.StorageInstance, fulfillmentService, chargeService *http
 	inst.router.POST("/orders", inst.postOrders)
 	inst.router.GET("/orders/:id", inst.getOrder)
 	inst.router.POST("/orders/:id/charge", inst.chargeOrder)
+	inst.router.POST("/orders/:id/cancel", inst.cancelOrder)
 
 	// *instance implements the http.Handler interface with the ServeHTTP method
 	// below so we can just return inst
@@ -346,6 +347,72 @@ func (i *instance) chargeOrder(c *gin.Context) {
 ////////////////////////////////////////////////////////////////////////////////
 
 // TODO: cancel args, res, function
+
+type cancelOrderRes struct {
+	RefundAmount int64  `json:"refundAmount"`
+	OrderID      string `json:"OrderID"`
+}
+
+// cancelOrder is called by incoming HTTP POST requests to /orders/:id/cancel
+func (i *instance) cancelOrder(c *gin.Context) {
+	// the context of the request we pass along to every downstream function so we
+	// can stop processing if the caller aborts the request and also to ensure that
+	// the tracing context is kept throughout the whole request
+	ctx := c.Request.Context()
+
+	// parse the body as JSON into the chargeOrderArgs struct
+	var args chargeOrderArgs
+	err := c.BindJSON(&args)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("error decoding body: %v", err)})
+		return
+	}
+
+	// since the path includes a param :id we can get the value for that by calling
+	// the Param function
+	id := c.Param("id")
+
+	// make a call to the storage instance to get the current state of the order
+	// so we can make sure that its ready to be cancelled
+	order, err := i.stor.GetOrder(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, storage.ErrOrderNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("error getting order: %v", err)})
+		}
+		return
+	}
+
+	if order.Status == storage.OrderStatusFulfilled {
+		c.JSON(http.StatusConflict, gin.H{"error": "order ineligible for refund since the order has been fulfilled already"})
+		return
+	}
+
+	refundAmount := order.TotalCents() * -1
+
+	err = i.innerChargeOrder(ctx, chargeServiceChargeArgs{
+		CardToken:   args.CardToken,
+		AmountCents: refundAmount,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	err = i.stor.SetOrderStatus(ctx, order.ID, storage.OrderStatusCancelled)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("error updating order to cancelled: %v", err)})
+		return
+	}
+
+	// since we successfully charged the order and updated the order status we can
+	// return a success to the caller
+	c.JSON(http.StatusOK, cancelOrderRes{
+		RefundAmount: order.TotalCents(),
+		OrderID:      order.ID,
+	})
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 
