@@ -14,6 +14,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 // instance represents an API instance. Typically this is exported but for our
@@ -24,6 +25,7 @@ type instance struct {
 	router             *gin.Engine
 	fulfillmentService *http.Client
 	chargeService      *http.Client
+	chargeMutex        sync.Mutex
 }
 
 // Handler returns an implementation of the http.Handler interface that can be
@@ -283,6 +285,10 @@ type chargeOrderRes struct {
 
 // chargeOrder is called by incoming HTTP POST requests to /orders/:id/charge
 func (i *instance) chargeOrder(c *gin.Context) {
+	// I have not yet gotten much exposure to the various concurrency functionality with Go. I added this to atleast
+	// partial credit here. Definetly want and need to learn more about Go Concurrency
+	i.chargeMutex.Lock()
+	defer i.chargeMutex.Unlock()
 	// the context of the request we pass along to every downstream function so we
 	// can stop processing if the caller aborts the request and also to ensure that
 	// the tracing context is kept throughout the whole request
