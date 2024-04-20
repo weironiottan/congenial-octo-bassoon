@@ -350,7 +350,7 @@ func (i *instance) chargeOrder(c *gin.Context) {
 
 type cancelOrderRes struct {
 	RefundAmount int64  `json:"refundAmount"`
-	OrderID      string `json:"OrderID"`
+	OrderID      string `json:"id"`
 }
 
 // cancelOrder is called by incoming HTTP POST requests to /orders/:id/cancel
@@ -421,12 +421,12 @@ func (i *instance) cancelOrder(c *gin.Context) {
 type fulfillmentServiceFulfillArgs struct {
 	Description string `json:"description"`
 	Quantity    int64  `json:"quantity"`
-	OrderID     string `json:"orderID"`
+	OrderID     string `json:"id"`
 }
 
 type fulfillmentServiceFulfillRes struct {
-	OrderID string              `json:"OrderID"`
-	Status  storage.OrderStatus `json:"Status"`
+	OrderID string              `json:"id"`
+	Status  storage.OrderStatus `json:"status"`
 }
 
 // TODO: fulfill args, res, function
