@@ -647,6 +647,92 @@ func TestChargeOrder(t *testing.T) {
 
 func TestPostCancelOrder(t *testing.T) {
 	// TODO: add tests
+	ctx := context.Background()
+
+	chgServ := mocks.NewMockedService(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// make sure the URL is /charge and the method is POST since that's the only
+		// endpoint the charge service has
+		require.Equal(t, "/charge", r.URL.Path)
+		require.Equal(t, http.MethodPost, r.Method)
+
+		// decode the body as a chargeServiceChargeArgs
+		var args chargeServiceChargeArgs
+		err := json.NewDecoder(r.Body).Decode(&args)
+		require.NoError(t, err)
+
+		// make sure the args are sane
+		//require.True(t, args.AmountCents > 0, "amountCents must be more than 0: %v", args.AmountCents)
+		require.NotEmpty(t, args.CardToken)
+
+		w.WriteHeader(http.StatusCreated)
+	}))
+
+	// Customer with order-1234 has an eligible order for refund. Should refund the total amount of 100
+	{
+		order := storage.Order{
+			ID:            "order-1234",
+			CustomerEmail: "test@test",
+			LineItems: []storage.LineItem{
+				{
+					Description: "item 1",
+					Quantity:    1,
+					PriceCents:  100,
+				},
+			},
+			Status: storage.OrderStatusCharged,
+		}
+		args := chargeOrderArgs{
+			CardToken: "amex",
+		}
+		stor := new(mocks.MockStorageInstance)
+		stor.On("GetOrder", ctx, order.ID).Return(order, nil).Once()
+		stor.On("SetOrderStatus", ctx, order.ID, storage.OrderStatusCancelled).Return(nil).Once()
+		h := Handler(stor, nil, chgServ)
+		w := httptest.NewRecorder()
+		byts, err := json.Marshal(args)
+		require.NoError(t, err)
+		r := httptest.NewRequest("POST", path.Join("/orders", order.ID, "cancel"), bytes.NewReader(byts)).WithContext(ctx)
+		h.ServeHTTP(w, r)
+		if assert.Equal(t, http.StatusOK, w.Code) {
+			assert.Contains(t, w.HeaderMap.Get("Content-Type"), "application/json")
+			var res cancelOrderRes
+			err = json.Unmarshal(w.Body.Bytes(), &res)
+			require.NoError(t, err)
+			assert.EqualValues(t, 100, res.RefundAmount)
+			assert.EqualValues(t, "order-1234", res.OrderID)
+		}
+		stor.AssertExpectations(t)
+	}
+
+	// Customer with order-12345 does not have an eligible order for refund since the order has been fulfilled. Message should be returned saying a refund was unable to be made
+	{
+		order := storage.Order{
+			ID:            "order-1234",
+			CustomerEmail: "test@test",
+			LineItems: []storage.LineItem{
+				{
+					Description: "item 1",
+					Quantity:    1,
+					PriceCents:  100,
+				},
+			},
+			Status: storage.OrderStatusFulfilled,
+		}
+		args := chargeOrderArgs{
+			CardToken: "amex",
+		}
+		stor := new(mocks.MockStorageInstance)
+		stor.On("GetOrder", ctx, order.ID).Return(order, nil).Once()
+		h := Handler(stor, nil, chgServ)
+		w := httptest.NewRecorder()
+		byts, err := json.Marshal(args)
+		require.NoError(t, err)
+		r := httptest.NewRequest("POST", path.Join("/orders", order.ID, "cancel"), bytes.NewReader(byts)).WithContext(ctx)
+		h.ServeHTTP(w, r)
+		assert.Equal(t, http.StatusConflict, w.Code)
+		stor.AssertExpectations(t)
+	}
+
 }
 
 ////////////////////////////////////////////////////////////////////////////////
