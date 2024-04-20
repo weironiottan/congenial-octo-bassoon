@@ -4,6 +4,10 @@ package storage
 
 import (
 	"context"
+	"fmt"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"log"
 	"time"
 
 	"github.com/levenlabs/go-llog"
@@ -16,9 +20,13 @@ type Instance struct {
 	// between every test run
 	// you should use this as the database name for all of your methods to simplify
 	// testing
-	database string
+	database   string
+	db         *mongo.Client
+	collection *mongo.Collection
+
 	// this is where you'd store any database connections like a *mongo.Client or
 	// *sql.DB
+
 }
 
 func New(overrideDatabase string) *Instance {
@@ -35,6 +43,15 @@ func New(overrideDatabase string) *Instance {
 	}
 
 	// TODO: code for connecting to the database and storing the connected driver
+	db, err := inst.openDB()
+	if err != nil {
+		log.Fatal(err)
+	}
+	inst.db = db
+	inst.collection = db.Database("test").Collection("Order")
+	// normally I would include a disconnect somewhere in the main, since we do not
+	// want to open/close the connection for each connection. I will leave it out because IDK where to put it here
+
 	// instance on inst
 
 	// give the ensureSchema function only 15 seconds to complete
@@ -59,4 +76,27 @@ func (i *Instance) ensureSchema(ctx context.Context) error {
 	// already setup
 	// for example you might need to add a unique index on the order's ID field ;)
 	return nil
+}
+
+func (i *Instance) openDB() (*mongo.Client, error) {
+
+	// Set connection options
+	clientOptions := options.Client().ApplyURI("mongodb://localhost:27017")
+
+	client, err := mongo.Connect(context.TODO(), clientOptions)
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Check the connection
+	err = client.Ping(context.TODO(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	client.Database("edmEvents").Collection("lasVegasEdmEventsCollection")
+
+	fmt.Println("Connected to MongoDB!")
+	return client, nil
 }
